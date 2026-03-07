@@ -2,8 +2,7 @@
 -- Runtime writes are owned by the ingest layer (rateatlas-ingest).
 -- Read by API via GET /v1/datasets/latest
 CREATE TABLE ingest_metadata (
-    id                      SERIAL PRIMARY KEY,
+    id                      INTEGER PRIMARY KEY DEFAULT 1,
     last_seen_page_update   DATE NOT NULL,
-    last_ingested_at        TIMESTAMPTZ NOT NULL,
-    freshness_state         VARCHAR(10) NOT NULL CHECK (freshness_state IN ('FRESH', 'STALE'))
+    last_ingested_at        TIMESTAMPTZ NOT NULL
 );
