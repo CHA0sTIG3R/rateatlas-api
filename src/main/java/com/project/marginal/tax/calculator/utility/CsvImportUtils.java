@@ -27,8 +27,6 @@ import java.util.*;
 @Component
 public class CsvImportUtils {
 
-    private final List<BracketEntry> rates = new ArrayList<>();
-
     /**
      * This method is used to import tax rates from a CSV file.
      * It reads the CSV file, parses the data, and populates the rate list with BracketEntry objects.
@@ -39,6 +37,8 @@ public class CsvImportUtils {
      * @throws CsvValidationException If a CSV validation error occurs.
      */
     public List<BracketEntry> importFromStream(InputStream in) throws IOException, CsvValidationException {
+        List<BracketEntry> rates = new ArrayList<>();
+
         try (Reader reader = new InputStreamReader(in)){
             CSVReader csvReader = new CSVReader(reader);
 
@@ -53,16 +53,16 @@ public class CsvImportUtils {
                 Integer year = Integer.valueOf(line[0]);
 
                 if (!line[1].isEmpty()) {
-                    insertTaxRate(year, FilingStatus.MFJ, line[1], line[2], line[3]);
+                    insertTaxRate(rates, year, FilingStatus.MFJ, line[1], line[2], line[3]);
                 }
                 if (!(line[4].isEmpty() && line[1].isEmpty())) {
-                    insertTaxRate(year, FilingStatus.MFS, line[4], line[5], line[6]);
+                    insertTaxRate(rates, year, FilingStatus.MFS, line[4], line[5], line[6]);
                 }
                 if (!(line[7].isEmpty() && line[1].isEmpty())) {
-                    insertTaxRate(year, FilingStatus.S, line[7], line[8], line[9]);
+                    insertTaxRate(rates, year, FilingStatus.S, line[7], line[8], line[9]);
                 }
                 if (!(line[10].isEmpty() && line[1].isEmpty())) {
-                    insertTaxRate(year, FilingStatus.HOH, line[10], line[11], line[12]);
+                    insertTaxRate(rates, year, FilingStatus.HOH, line[10], line[11], line[12]);
                 }
             }
         }
@@ -74,12 +74,13 @@ public class CsvImportUtils {
      * This method is used to insert a tax rate into the rate list.
      * It creates a new BracketEntry object and sets its properties based on the provided parameters.
      *
+     * @param rates The list of tax rates to add to.
      * @param year The year of the tax rate.
      * @param status The filing status (e.g., "Married Filing Jointly").
      * @param rawRate The raw tax rate as a string (e.g., "24%").
      * @param rawStart The raw starting range as a string (e.g., "$50,000").
      */
-    private void insertTaxRate(Integer year, FilingStatus status, String rawRate, String rawStart, String rawEnd) {
+    private void insertTaxRate( List<BracketEntry> rates, Integer year, FilingStatus status, String rawRate, String rawStart, String rawEnd) {
 
         boolean isNoIncomeTax = rawRate.isEmpty() || rawRate.equalsIgnoreCase("No income tax");
 
