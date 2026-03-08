@@ -9,5 +9,4 @@ import java.util.Optional;
 @Repository
 public interface IngestMetadataRepository extends JpaRepository<IngestMetadata, Integer> {
     // single row, always id=1
-    Optional<IngestMetadata> findById(int id);
 }
