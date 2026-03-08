@@ -4,5 +4,6 @@
 CREATE TABLE ingest_metadata (
     id                      INTEGER PRIMARY KEY DEFAULT 1,
     last_seen_page_update   DATE NOT NULL,
-    last_ingested_at        TIMESTAMPTZ NOT NULL
+    last_ingested_at        TIMESTAMPTZ NOT NULL,
+    CONSTRAINT single_row CHECK (id = 1)
 );
