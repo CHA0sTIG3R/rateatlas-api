@@ -40,7 +40,5 @@ public interface TaxRateRepository extends JpaRepository<TaxRate, Long> {
     @Query("SELECT MAX(t.year) FROM TaxRate t")
     Optional<Integer> findMaxYear();
 
-    void deleteByYear(Integer year);
-
     boolean existsByYear(Integer year);
 }
