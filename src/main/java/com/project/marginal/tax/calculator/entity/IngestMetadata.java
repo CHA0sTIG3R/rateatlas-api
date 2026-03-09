@@ -27,4 +27,10 @@ public class IngestMetadata {
 
     @Column(name = "last_ingested_at")
     private OffsetDateTime lastIngestedAt;
+
+    @Column(name = "ingest_run_count")
+    private Integer ingestRunCount;
+
+    @Column(name = "ingest_skip_count")
+    private Integer ingestSkipCount;
 }
