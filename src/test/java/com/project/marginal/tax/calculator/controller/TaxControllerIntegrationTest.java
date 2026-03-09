@@ -3,6 +3,7 @@ package com.project.marginal.tax.calculator.controller;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.project.marginal.tax.calculator.dto.*;
 import com.project.marginal.tax.calculator.entity.FilingStatus;
+import com.project.marginal.tax.calculator.config.SecurityConfig;
 import com.project.marginal.tax.calculator.exception.GlobalExceptionHandler;
 import com.project.marginal.tax.calculator.security.ApiKeyFilter;
 import com.project.marginal.tax.calculator.service.TaxDataImportService;
@@ -35,7 +36,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 
 @WebMvcTest(controllers = TaxController.class)
-@Import({GlobalExceptionHandler.class, ApiKeyFilter.class})
+@Import({GlobalExceptionHandler.class, ApiKeyFilter.class, SecurityConfig.class})
 public class TaxControllerIntegrationTest {
 
     @Autowired
