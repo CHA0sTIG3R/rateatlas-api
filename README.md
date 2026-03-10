@@ -1,185 +1,237 @@
 # RateAtlas · TaxIQ (`rateatlas-api`)
 
-> Spring Boot REST API serving U.S. federal tax bracket data (1862–present) and powering RateAtlas calculations.
+> Versioned tax bracket API with observability, freshness tracking, and CI/CD.
 >
 > Part of the [RateAtlas](../README.md) stack.
 
 ## Overview
 
-This application exposes historical tax brackets and metrics, and calculates liabilities for specified income scenarios. It pairs with the [`tax_bracket_ingest`](https://github.com/CHA0sTIG3R/tax-bracket-ingest) microservice, which scrapes each year’s IRS data, archives it to S3, and pushes new records here.
+`TaxIQ` is a Spring Boot 3 REST API that serves versioned U.S. federal income tax bracket data. It is the primary backend for the RateAtlas platform, providing tax calculation, simulation, and dataset freshness endpoints backed by PostgreSQL.
 
-## Implementation Status
+On startup, TaxIQ bootstraps its database from the latest CSV archived in S3 if no data is present. Ongoing data updates are pushed directly by the `BracketForge` ingest Lambda after detecting IRS page changes.
 
-| Component / Endpoint             | Status        |
-|----------------------------------|---------------|
-| Historical data import (S3 CSV)  | ✅ Implemented |
-| `POST /api/v1/tax/upload`        | ✅ Implemented |
-| `GET  /api/v1/tax/years`         | ✅ Implemented |
-| `GET  /api/v1/tax/filing-status` | ✅ Implemented |
-| `GET  /api/v1/tax/rate`          | ✅ Implemented |
-| `POST /api/v1/tax/breakdown`     | ✅ Implemented |
-| `GET  /api/v1/tax/summary`       | ✅ Implemented |
-| `GET  /api/v1/tax/history`       | ✅ Implemented |
-| `POST /api/v1/tax/simulate`      | ✅ Implemented |
-| Swagger UI / OpenAPI docs        | ✅ Implemented |
-| Spring Boot Actuator endpoints   | ✅ Implemented |
-| Docker container (WAR)           | ✅ Implemented |
-| OAuth2 / Security                | 🔲 Planned    |
-| Rate limiting / Throttling       | 🔲 Planned    |
+---
 
-> ✅ = Complete & tested   🔲 = Not yet implemented
+## Table of Contents
+
+- [Overview](#overview)
+- [Features](#features)
+- [Implementation Status](#implementation-status)
+- [Project Structure](#project-structure)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [API Endpoints](#api-endpoints)
+- [Observability](#observability)
+- [Testing](#testing)
+- [Continuous Integration](#continuous-integration)
+- [Contributing](#contributing)
+- [License](#license)
 
 ---
 
 ## Features
 
-* **REST Endpoints** covering data ingestion, years, filing statuses, brackets, breakdowns, summaries, historical metrics, and bulk simulations.
-* **Data Import** on startup from an S3 CSV archive (`TaxDataBootstrapper`).
-* **Spring Data JPA** with PostgreSQL (default) or H2 in-memory.
-* **OpenAPI / Swagger UI** for interactive API docs.
-* **Spring Boot Actuator** for health, metrics, and info endpoints.
-* **Unit & Integration Tests** using JUnit 5 and Testcontainers.
+- **Versioned tax data** — brackets stored and queryable by year across all four filing statuses.
+- **Dataset freshness endpoint** — exposes IRS page update date, last ingest timestamp, and computed freshness state.
+- **S3 bootstrap** — automatically seeds the database from S3 on first startup if no data is present.
+- **Prometheus metrics** — exposes request latency histograms, tax calculation counters, simulation counters, ingest run/skip counts, and data freshness gauges.
+- **Grafana Cloud observability** — metrics scraped by Grafana Alloy on EC2 and forwarded to Grafana Cloud hosted Prometheus.
+- **Spring Security** — `/actuator/prometheus` endpoint protected with HTTP Basic auth.
+- **Flyway migrations** — all schema changes version-controlled and applied automatically on startup.
+- **OpenAPI / Swagger UI** — interactive API docs at `/swagger-ui/index.html`.
+- **GitHub Actions CI/CD** — test, build, push to ECR, and deploy to EC2 on every merge to `main`.
+- **Testcontainers integration tests** — real PostgreSQL container spun up in CI for integration coverage.
 
 ---
 
-## Technology Stack
+## Implementation Status
 
-| Layer       | Technology                        |
-|-------------|-----------------------------------|
-| Language    | Java 17                           |
-| Framework   | Spring Boot 3.4.4                 |
-| Build tool  | Maven (WAR packaging)             |
-| Persistence | Spring Data JPA + PostgreSQL / H2 |
-| CSV Parsing | OpenCSV                           |
-| API Docs    | springdoc-openapi (Swagger UI)    |
-| Testing     | JUnit 5, Testcontainers, Mockito  |
-| Actuator    | spring-boot-starter-actuator      |
-| AWS SDK     | software.amazon.awssdk\:s3        |
+| Feature                          | Status        |
+|----------------------------------|---------------|
+| Tax bracket CRUD endpoints       | ✅ Implemented |
+| Tax calculation endpoints        | ✅ Implemented |
+| Bulk simulation endpoint         | ✅ Implemented |
+| Dataset freshness endpoint       | ✅ Implemented |
+| S3 bootstrap on startup          | ✅ Implemented |
+| Flyway schema migrations         | ✅ Implemented |
+| OpenAPI / Swagger UI             | ✅ Implemented |
+| Spring Boot Actuator             | ✅ Implemented |
+| Prometheus metrics               | ✅ Implemented |
+| Grafana Cloud observability      | ✅ Implemented |
+| Spring Security (actuator auth)  | ✅ Implemented |
+| GitHub Actions CI/CD             | ✅ Implemented |
+| Testcontainers integration tests | ✅ Implemented |
+| Redis caching                    | 🔲 Planned    |
+| Rate limiting / throttling       | 🔲 Planned    |
+| Circuit breaker                  | 🔲 Planned    |
+| OAuth2 / API key auth            | 🔲 Planned    |
+
+> ✅ = Complete & tested  🔲 = Not yet implemented
 
 ---
 
-## Getting Started
-
-### Prerequisites
-
-* **JDK 17** or newer
-* **Maven 3.8+**
-* **PostgreSQL 12+** (or use embedded H2)
-
-### Clone & Run
-
-```bash
-git clone https://github.com/CHA0sTIG3R/Marginal-tax-rate-calculator.git
-cd Marginal-tax-rate-calculator
+## Project Structure
+```
+src/main/java/com/project/marginal/tax/calculator/
+├── bootstrap/
+│   └── TaxDataBootstrapper.java    # Seeds DB from S3 on startup if empty
+├── config/
+│   └── SecurityConfig.java         # Spring Security — protects /actuator/prometheus
+├── controller/
+│   ├── DatasetController.java      # GET /api/v1/datasets/latest
+│   └── TaxController.java          # Tax bracket and calculation endpoints
+├── dto/
+│   ├── DatasetFreshnessResponse.java
+│   └── ...
+├── entity/
+│   ├── IngestMetadata.java
+│   └── TaxRate.java
+├── exception/
+│   └── GlobalExceptionHandler.java
+├── metrics/
+│   └── MetricsService.java         # Prometheus counters and gauges
+├── repository/
+│   ├── IngestMetadataRepository.java
+│   └── TaxRateRepository.java
+├── service/
+│   ├── DatasetService.java         # Freshness computation and metadata reads
+│   └── TaxService.java             # Tax calculation and simulation logic
+└── utility/
+    └── CsvImportUtils.java         # CSV parsing for S3 bootstrap and uploads
 ```
 
-#### With Data Import
+---
 
+## Installation
+
+1. Clone this repository:
 ```bash
-mvn spring-boot:run -Dspring-boot.run.profiles=data-import
+   git clone https://github.com/CHA0sTIG3R/rateatlas-api.git
+   cd rateatlas-api
 ```
 
-#### API Only
+1. Ensure you have Java 17+ and Maven installed.
 
+2. Start a local PostgreSQL instance (or use Docker):
 ```bash
-mvn spring-boot:run
+   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
 ```
 
-Service listens on port **8080**.
-
-### Local with Docker (app + DB)
-
+1. Build the project:
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
+   ./mvnw clean package -DskipTests
 ```
-
-Logs: `docker compose logs -f` (local driver). App: http://localhost:8080/swagger-ui/index.html
 
 ---
 
 ## Configuration
 
-- application.properties is env-first and contains no secrets.
-- Copy `.env.example` → `.env` (for Compose) and set real values.
+Key environment variables (copy `.env.example` → `.env.local` for local Docker runs):
+```ini
+# Database
+SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/rateatlas
+SPRING_DATASOURCE_USERNAME=rateatlas
+SPRING_DATASOURCE_PASSWORD=secret
 
-Key env vars:
-- Datasource: `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`
-- API key: `APP_INGEST_API_KEY` (protects `/api/v1/tax/upload`)
-- Import: `TAX_IMPORT_ON_STARTUP`, `TAX_S3_BUCKET`, `TAX_S3_KEY`, `AWS_REGION` or `tax.s3-region`
-- Schemas: `SPRING_FLYWAY_SCHEMAS`, `SPRING_FLYWAY_DEFAULT_SCHEMA`, `APP_DB_SCHEMA`
+# AWS (for S3 bootstrap)
+AWS_REGION=us-east-1
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+S3_BUCKET=your-s3-bucket-name
+S3_KEY=history.csv
 
-Local Docker override: see `docker-compose.local.yml` to build locally and run with a local Postgres (no CloudWatch logging).
+# Ingest API key (authenticates pushes from BracketForge Lambda)
+APP_INGEST_API_KEY=your-shared-secret
+
+# Prometheus scrape auth
+PROMETHEUS_SCRAPE_USERNAME=your-scrape-username
+PROMETHEUS_SCRAPE_PASSWORD=your-scrape-password
+```
+
+> Production secrets are managed via environment variables injected at deploy time. Never commit `.env` files.
 
 ---
 
-## API Reference
+## API Endpoints
 
-Base path: `/api/v1/tax`
+Live docs: `https://api.ratesatlas.com/swagger-ui/index.html`
 
-| Endpoint                                                               | Method | Description                                                                                        |
-|------------------------------------------------------------------------|--------|----------------------------------------------------------------------------------------------------|
-| `/upload`                                                              | POST   | Ingest CSV data (text/csv) into the database. Body: raw CSV. Returns status string.                |
-| `/years`                                                               | GET    | List all available tax years.                                                                      |
-| `/filing-status`                                                       | GET    | Supported filing statuses (e.g., S, MFJ, MFS, HOH).                                                |
-| `/rate?year={year}[&status={code}]`                                    | GET    | Tax brackets for a given year and optional filing status.                                          |
-| `/breakdown`                                                           | POST   | Single-scenario breakdown. Body: JSON tax input `{ "year":2021, "status":"MFJ", "income":60000 }`. |
-| `/summary?year={year}&status={code}`                                   | GET    | Total tax, average rate, bracket count, thresholds for specified year/status.                      |
-| `/history?status={code}&metric={type}&startYear={YYYY}&endYear={YYYY}` | GET    | Year-over-year metric values (e.g., TOP\_RATE, AVERAGE\_RATE, COUNT).                              |
-| `/simulate`                                                            | POST   | Bulk tax breakdowns. Body: JSON array of tax inputs. Returns list of responses.                    |
+| Method | Path                        | Description                                                    |
+|--------|-----------------------------|----------------------------------------------------------------|
+| POST   | `/api/v1/tax/upload`        | Ingest CSV upload (authenticated, Lambda only)                 |
+| GET    | `/api/v1/tax/years`         | All available tax years                                        |
+| GET    | `/api/v1/tax/filing-status` | Supported filing statuses (S, MFJ, MFS, HOH)                   |
+| GET    | `/api/v1/tax/rate`          | Tax brackets for a given year and optional filing status       |
+| POST   | `/api/v1/tax/breakdown`     | Single-scenario tax breakdown `{ year, status, income }`       |
+| GET    | `/api/v1/tax/summary`       | Total tax, average rate, bracket count for a given year/status |
+| GET    | `/api/v1/tax/history`       | Year-over-year metrics (TOP_RATE, AVERAGE_RATE, COUNT)         |
+| POST   | `/api/v1/tax/simulate`      | Bulk tax breakdowns across multiple income scenarios           |
+| GET    | `/api/v1/datasets/latest`   | Dataset freshness metadata                                     |
+| GET    | `/actuator/health`          | Health check                                                   |
+| GET    | `/actuator/prometheus`      | Prometheus metrics (basic auth required)                       |
 
-**Swagger UI**:
-
+### `GET /api/v1/datasets/latest` — Example Response
+```json
+{
+  "latestAvailableTaxYear": 2024,
+  "irsPageLastUpdated": "2026-02-20",
+  "lastIngestedAt": "2026-02-21T08:34:12Z",
+  "freshnessState": "FRESH",
+  "sourceUrl": "https://www.irs.gov/filing/federal-income-tax-rates-and-brackets"
+}
 ```
-http://localhost:8080/swagger-ui/index.html
-```
+
+`freshnessState` is computed dynamically:
+- `FRESH` — latest available year is current year minus one or newer
+- `STALE` — latest available year is older than current year minus one
 
 ---
 
-## Actuator Endpoints
+## Observability
 
-* Health:  `/actuator/health`
-* Metrics: `/actuator/metrics`
-* Info:    `/actuator/info`
+TaxIQ exposes a Prometheus-compatible metrics endpoint at `/actuator/prometheus` (basic auth required).
 
----
+**Custom metrics:**
 
-## Project Structure
+| Metric                              | Type    | Description                                      |
+|-------------------------------------|---------|--------------------------------------------------|
+| `rateatlas_tax_calculations_total`  | Counter | Tax calculation requests served                  |
+| `rateatlas_tax_simulations_total`   | Counter | Bulk simulation requests served                  |
+| `rateatlas_data_freshness_days`     | Gauge   | Days since last ingest                           |
+| `rateatlas_ingest_run_count`        | Gauge   | Total ingest runs recorded in metadata           |
+| `rateatlas_ingest_skip_count`       | Gauge   | Total skipped runs (no IRS page change detected) |
 
-```
-src/main/java/com/project/marginal/tax/calculator
-├── bootstrap      # CSV import runner (TaxDataBootstrapper)
-├── config         # Swagger, CORS, Jackson
-├── controller     # REST API (TaxController)
-├── dto            # Request/response DTOs (TaxInput, TaxRateDto, TaxPaidResponse, TaxSummaryResponse, YearMetric)
-├── entity         # JPA entities (TaxRate, FilingStatus)
-├── exception      # Global exception handlers
-├── repository     # Spring Data JPA interfaces
-├── service        # Business logic & import services
-└── utility        # CSV parsing helpers
-```
+Metrics are scraped by **Grafana Alloy** running on the same EC2 instance and forwarded to **Grafana Cloud** hosted Prometheus. The live dashboard tracks API uptime, p95 request latency, data freshness, and calculation throughput.
 
 ---
 
 ## Testing
+```bash
+./mvnw test        # unit tests only
+./mvnw verify      # unit + Testcontainers integration tests
+```
 
-* **Unit tests**: `mvn test` (requires Docker for Testcontainers)
-* **Integration tests**: `mvn test` (requires Docker for Testcontainers)
+Integration tests spin up a real PostgreSQL container via Testcontainers — no external DB required.
 
 ---
 
 ## Continuous Integration
 
-GitHub Actions:
-- `.github/workflows/ci.yml`: build & test on Java 17
-- `.github/workflows/deploy.yml`: build image → push to ECR → deploy to EC2 via SSM
-- Skip CI on a push: include `[skip ci]` in the commit message
+GitHub Actions handles:
+
+- `.github/workflows/ci.yml` — runs unit and integration tests on every push, uploads coverage to Codecov
+- `.github/workflows/deploy.yml` — builds Docker image, pushes to AWS ECR, deploys to EC2 via SSM (on `main` only)
+
+Use `[skip ci]` in your commit message to bypass pipelines for documentation-only changes.
+
+---
 
 ## Contributing
 
-1. Fork the repository
-2. Create feature branch: `git checkout -b feature/xyz`
-3. Implement changes and add tests
-4. Open a PR against `main`
+1. Fork the repo
+2. Create a feature branch: `git checkout -b feature/name`
+3. Commit your changes: `git commit -m "Add feature"`
+4. Push and open a PR targeting `main`
 
 ---
 
