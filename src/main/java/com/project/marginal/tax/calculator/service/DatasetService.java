@@ -2,6 +2,7 @@ package com.project.marginal.tax.calculator.service;
 
 import com.project.marginal.tax.calculator.dto.DatasetFreshnessResponse;
 import com.project.marginal.tax.calculator.entity.IngestMetadata;
+import com.project.marginal.tax.calculator.metrics.MetricsService;
 import com.project.marginal.tax.calculator.repository.IngestMetadataRepository;
 import com.project.marginal.tax.calculator.repository.TaxRateRepository;
 import lombok.RequiredArgsConstructor;
@@ -18,10 +19,15 @@ public class DatasetService {
 
     private final IngestMetadataRepository metadataRepo;
     private final TaxRateRepository taxRateRepo;
+    private final MetricsService metricsService;
 
     public DatasetFreshnessResponse getLatestDataset() {
         IngestMetadata metadata = metadataRepo.findById(1)
                 .orElseThrow(() -> new IllegalStateException("No ingest metadata found"));
+
+        if (metadata.getLastIngestedAt() != null) {
+            metricsService.updateDataFreshness(metadata.getLastIngestedAt().toLocalDate());
+        }
 
         Integer latestYear = taxRateRepo.findMaxYear()
             .orElseThrow(() -> new IllegalStateException("No tax data found"));

@@ -15,6 +15,7 @@ import com.project.marginal.tax.calculator.dto.*;
 import com.project.marginal.tax.calculator.entity.FilingStatus;
 import com.project.marginal.tax.calculator.entity.NoIncomeTaxYear;
 import com.project.marginal.tax.calculator.entity.TaxRate;
+import com.project.marginal.tax.calculator.metrics.MetricsService;
 import com.project.marginal.tax.calculator.repository.NoIncomeTaxYearRepository;
 import com.project.marginal.tax.calculator.repository.TaxRateRepository;
 import lombok.RequiredArgsConstructor;
@@ -36,6 +37,7 @@ public class TaxService {
 
     private final TaxRateRepository taxRateRepo;
     private final NoIncomeTaxYearRepository noTaxRepo;
+    private final MetricsService metricsService;
 
     private boolean isNotValidYear(int year) {
         return year < MIN_YEAR || year > MAX_YEAR;
@@ -196,6 +198,7 @@ public class TaxService {
         float totalTaxPaid = getTotalTaxPaid(taxInput);
         float avgRate = totalTaxPaid / taxInput.getIncome();
 
+        metricsService.recordTaxCalculation();
         return new TaxPaidResponse(taxPaidInfos, totalTaxPaid, avgRate);
     }
 
@@ -312,6 +315,7 @@ public class TaxService {
     }
 
     public List<TaxPaidResponse> simulateBulk(List<TaxInput> taxInputs) {
+        metricsService.recordSimulateBulk();
         return taxInputs.stream()
                 .map(this::calculateTaxBreakdown)
                 .toList();
