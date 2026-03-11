@@ -6,6 +6,7 @@ import com.project.marginal.tax.calculator.entity.FilingStatus;
 import com.project.marginal.tax.calculator.config.SecurityConfig;
 import com.project.marginal.tax.calculator.exception.GlobalExceptionHandler;
 import com.project.marginal.tax.calculator.security.ApiKeyFilter;
+import com.project.marginal.tax.calculator.service.CacheService;
 import com.project.marginal.tax.calculator.service.TaxDataImportService;
 import com.project.marginal.tax.calculator.service.TaxService;
 import org.junit.jupiter.api.Test;
@@ -47,6 +48,9 @@ public class TaxControllerIntegrationTest {
 
     @MockitoBean
     private TaxDataImportService importService;
+
+    @MockitoBean
+    private CacheService cacheService;
 
     @Value("${app.ingest.api-key}")
     private String apiKey;
