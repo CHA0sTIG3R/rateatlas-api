@@ -46,7 +46,14 @@ public class TaxService {
         return year < MIN_YEAR || year > MAX_YEAR;
     }
     private boolean isNoTaxYear(int year) {
-        return noTaxRepo.existsById(year);
+        String cacheKey = String.format("noTaxYear-%d", year);
+        Boolean cached = (Boolean) cacheService.get(cacheKey);
+        if (cached != null) {
+            return cached;
+        }
+        boolean noTaxYear = noTaxRepo.existsById(year);
+        cacheService.put(cacheKey, noTaxYear);
+        return noTaxYear;
     }
 
     private void validateTaxInput(TaxInput taxInput) {
