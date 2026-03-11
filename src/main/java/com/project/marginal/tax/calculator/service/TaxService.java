@@ -18,6 +18,8 @@ import com.project.marginal.tax.calculator.entity.TaxRate;
 import com.project.marginal.tax.calculator.metrics.MetricsService;
 import com.project.marginal.tax.calculator.repository.NoIncomeTaxYearRepository;
 import com.project.marginal.tax.calculator.repository.TaxRateRepository;
+import io.opentelemetry.instrumentation.annotations.SpanAttribute;
+import io.opentelemetry.instrumentation.annotations.WithSpan;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -103,7 +105,8 @@ public class TaxService {
                 .toList();
     }
 
-    public List<TaxRateDto> getRates(int year, FilingStatus status) {
+    @WithSpan("tax.brackets.lookup")
+    public List<TaxRateDto> getRates(@SpanAttribute("tax.year") int year, @SpanAttribute("tax.status") FilingStatus status) {
         if (isNotValidYear(year)) {
             throw new IllegalArgumentException("Invalid year: " + year);
         }
@@ -184,7 +187,8 @@ public class TaxService {
                 .sum();
     }
 
-    public TaxPaidResponse calculateTaxBreakdown(TaxInput taxInput) throws IllegalArgumentException {
+    @WithSpan("tax.calculate.breakdown")
+    public TaxPaidResponse calculateTaxBreakdown(@SpanAttribute("tax.year") TaxInput taxInput) throws IllegalArgumentException {
         validateTaxInput(taxInput);
 
         if (isNoTaxYear(taxInput.getYear())) {
@@ -202,7 +206,8 @@ public class TaxService {
         return new TaxPaidResponse(taxPaidInfos, totalTaxPaid, avgRate);
     }
 
-    public TaxSummaryResponse getSummary(int year, FilingStatus status) throws IllegalArgumentException {
+    @WithSpan("tax.summary")
+    public TaxSummaryResponse getSummary(@SpanAttribute("tax.year") int year, @SpanAttribute("tax.status") FilingStatus status) throws IllegalArgumentException {
 
         if (isNotValidYear(year)) {
             throw new IllegalArgumentException("Invalid year: " + year);
@@ -238,11 +243,12 @@ public class TaxService {
         return TaxSummaryResponse.normal(year, status, bracketCount, minThreshold, maxThreshold, averageRate);
     }
 
+    @WithSpan("tax.history")
     public List<YearMetric> getHistory(
-            FilingStatus status,
-            Metric metric,
-            Integer startYear,
-            Integer endYear
+            @SpanAttribute("tax.status") FilingStatus status,
+            @SpanAttribute("tax.metric") Metric metric,
+            @SpanAttribute("tax.start_year") Integer startYear,
+            @SpanAttribute("tax.end_year") Integer endYear
     ) {
         if ((isNotValidYear(startYear) || isNotValidYear(endYear)) || (startYear > endYear)) {
             throw new IllegalArgumentException("Invalid year range: " + startYear + " - " + endYear);
@@ -314,6 +320,7 @@ public class TaxService {
         }).toList();
     }
 
+    @WithSpan("tax.simulate.bulk")
     public List<TaxPaidResponse> simulateBulk(List<TaxInput> taxInputs) {
         metricsService.recordSimulateBulk();
         return taxInputs.stream()
