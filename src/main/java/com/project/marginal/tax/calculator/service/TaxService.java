@@ -40,6 +40,7 @@ public class TaxService {
     private final TaxRateRepository taxRateRepo;
     private final NoIncomeTaxYearRepository noTaxRepo;
     private final MetricsService metricsService;
+    private final CacheService cacheService;
 
     private boolean isNotValidYear(int year) {
         return year < MIN_YEAR || year > MAX_YEAR;
@@ -118,11 +119,19 @@ public class TaxService {
             return List.of(TaxRateDto.noIncomeTax(year, status, msg));
         }
 
-        if (status == null) {
-            return getTaxRateByYear(year);
-        } else {
-            return getTaxRateByYearAndStatus(year, status);
+        String cacheKey = String.format("brackets:%d:%s", year, status != null? status.name() : "ALL");
+        @SuppressWarnings("unchecked")
+        List<TaxRateDto> cached = (List<TaxRateDto>) cacheService.get(cacheKey);
+        if (cached != null) {
+            return cached;
         }
+
+        List<TaxRateDto> result = status == null
+                ? getTaxRateByYear(year)
+                : getTaxRateByYearAndStatus(year, status);
+
+        cacheService.put(cacheKey, result);
+        return result;
     }
 
     public List<TaxRate> getTaxRateByYearAndStatusAndRangeStartLessThan(int year, FilingStatus status, float income) {
@@ -198,12 +207,21 @@ public class TaxService {
             return TaxPaidResponse.noIncomeTax(msg);
         }
 
+        String cacheKey = String.format("calc:%d:%s:%f", taxInput.getYear(), taxInput.getStatus().name(), taxInput.getIncome());
+        TaxPaidResponse cached = (TaxPaidResponse) cacheService.get(cacheKey);
+        if (cached != null) {
+            return cached;
+        }
+
         List<TaxPaidInfo> taxPaidInfos = getTaxPaidInfo(taxInput);
         float totalTaxPaid = getTotalTaxPaid(taxInput);
         float avgRate = totalTaxPaid / taxInput.getIncome();
 
+        TaxPaidResponse result = new TaxPaidResponse(taxPaidInfos, totalTaxPaid, avgRate);
+        cacheService.put(cacheKey, result);
+
         metricsService.recordTaxCalculation();
-        return new TaxPaidResponse(taxPaidInfos, totalTaxPaid, avgRate);
+        return result;
     }
 
     @WithSpan("tax.summary")
