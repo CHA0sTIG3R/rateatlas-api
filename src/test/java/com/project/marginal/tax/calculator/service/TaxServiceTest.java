@@ -30,15 +30,15 @@ public class TaxServiceTest {
 
     private TaxRateRepository repo;
     private NoIncomeTaxYearRepository noTaxRepo;
-    private MetricsService metricsService;
     private TaxService service;
 
     @BeforeEach
     public void setUp() {
         repo = Mockito.mock(TaxRateRepository.class);
         noTaxRepo = Mockito.mock(NoIncomeTaxYearRepository.class);
-        metricsService = Mockito.mock(MetricsService.class);
-        service = new TaxService(repo, noTaxRepo, metricsService);
+        MetricsService metricsService = Mockito.mock(MetricsService.class);
+        CacheService cacheService = Mockito.mock(CacheService.class);
+        service = new TaxService(repo, noTaxRepo, metricsService, cacheService);
     }
 
     @Test
