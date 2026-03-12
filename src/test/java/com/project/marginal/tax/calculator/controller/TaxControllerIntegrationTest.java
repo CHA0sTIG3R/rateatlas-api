@@ -5,10 +5,15 @@ import com.project.marginal.tax.calculator.dto.*;
 import com.project.marginal.tax.calculator.entity.FilingStatus;
 import com.project.marginal.tax.calculator.config.SecurityConfig;
 import com.project.marginal.tax.calculator.exception.GlobalExceptionHandler;
-import com.project.marginal.tax.calculator.security.ApiKeyFilter;
+import com.project.marginal.tax.calculator.filter.ApiKeyFilter;
+import com.project.marginal.tax.calculator.filter.RateLimitFilter;
 import com.project.marginal.tax.calculator.service.CacheService;
 import com.project.marginal.tax.calculator.service.TaxDataImportService;
 import com.project.marginal.tax.calculator.service.TaxService;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletRequest;
+import jakarta.servlet.ServletResponse;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -30,6 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -52,10 +58,21 @@ public class TaxControllerIntegrationTest {
     @MockitoBean
     private CacheService cacheService;
 
+    @MockitoBean
+    private RateLimitFilter rateLimitFilter;
+
     @Value("${app.ingest.api-key}")
     private String apiKey;
 
     private final ObjectMapper mapper = new ObjectMapper();
+
+    @BeforeEach
+    void setUpRateLimitFilter() throws Exception {
+        doAnswer(inv -> {
+            ((FilterChain) inv.getArgument(2)).doFilter(inv.getArgument(0), inv.getArgument(1));
+            return null;
+        }).when(rateLimitFilter).doFilter(any(ServletRequest.class), any(ServletResponse.class), any(FilterChain.class));
+    }
 
      @Test
      public void getYears_returnsOk() throws Exception {
