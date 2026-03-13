@@ -11,6 +11,7 @@
 
 package com.project.marginal.tax.calculator.exception;
 
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.jetbrains.annotations.NotNull;
 import org.springframework.http.HttpHeaders;
@@ -157,7 +158,27 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return new ResponseEntity<>(body, HttpStatus.SERVICE_UNAVAILABLE);
     }
 
-    // 8) Catch‑all for everything else
+    // 8) Circuit breaker open — upstream dependency temporarily unavailable
+    @ExceptionHandler(CallNotPermittedException.class)
+    public ResponseEntity<ErrorResponse> handleCallNotPermitted(
+            CallNotPermittedException ex,
+            HttpServletRequest request) {
+
+        String message = String.format(
+                "Service temporarily unavailable — circuit '%s' is open",
+                ex.getCausingCircuitBreakerName());
+        ErrorResponse body = new ErrorResponse(
+                HttpStatus.SERVICE_UNAVAILABLE.value(),
+                "Service Unavailable",
+                message,
+                request.getRequestURI()
+        );
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .header(HttpHeaders.RETRY_AFTER, "60")
+                .body(body);
+    }
+
+    // 9) Catch‑all for everything else
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleAll(
             @NotNull Exception ex,
