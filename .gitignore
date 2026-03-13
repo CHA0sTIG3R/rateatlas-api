@@ -1,10 +1,71 @@
-HELP.md
+# ============================================================
+# Maven
+# ============================================================
 target/
 !.mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/
+.mvn/timing.properties
 
-### STS ###
+# ============================================================
+# Java
+# ============================================================
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+
+# JVM crash logs
+hs_err_pid*.log
+replay_pid*.log
+
+# ============================================================
+# Spring Boot
+# ============================================================
+HELP.md
+
+# Local/environment-specific config overrides
+src/main/resources/application-local.*
+src/main/resources/application-dev.*
+src/main/resources/application-prod.*
+src/main/resources/application-staging.*
+
+# ============================================================
+# Secrets and credentials
+# ============================================================
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.jks
+*.keystore
+*.truststore
+aws-credentials.properties
+
+# ============================================================
+# Logs
+# ============================================================
+*.log
+logs/
+
+# ============================================================
+# Docker
+# ============================================================
+docker-compose.override.yml
+
+# ============================================================
+# IDEs — IntelliJ IDEA
+# ============================================================
+.idea/
+*.iws
+*.iml
+*.ipr
+
+# ============================================================
+# IDEs — Spring Tool Suite (STS / Eclipse)
+# ============================================================
 .apt_generated
 .classpath
 .factorypath
@@ -13,13 +74,9 @@ target/
 .springBeans
 .sts4-cache
 
-### IntelliJ IDEA ###
-.idea
-*.iws
-*.iml
-*.ipr
-
-### NetBeans ###
+# ============================================================
+# IDEs — NetBeans
+# ============================================================
 /nbproject/private/
 /nbbuild/
 /dist/
@@ -29,12 +86,31 @@ build/
 !**/src/main/**/build/
 !**/src/test/**/build/
 
-### VS Code ###
+# ============================================================
+# IDEs — VS Code
+# ============================================================
 .vscode/
 
-### Application
-/src/main/resources/static/*
+# ============================================================
+# OS
+# ============================================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
 
-.env
-.env.local
-.env.prod
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+
+# ============================================================
+# Application-specific
+# ============================================================
+# Static assets managed outside source control
+/src/main/resources/static/*
