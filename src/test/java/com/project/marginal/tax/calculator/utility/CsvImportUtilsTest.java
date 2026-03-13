@@ -4,6 +4,7 @@ import com.project.marginal.tax.calculator.dto.BracketEntry;
 import com.project.marginal.tax.calculator.entity.FilingStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 
@@ -107,6 +108,7 @@ public class CsvImportUtilsTest {
     }
 
     @Test
+    @EnabledIfEnvironmentVariable(named = "AWS_ACCESS_KEY_ID", matches = ".+")
     public void importPerformance() throws Exception {
         InputStream in = s3Client.getObject(
                 GetObjectRequest.builder()
