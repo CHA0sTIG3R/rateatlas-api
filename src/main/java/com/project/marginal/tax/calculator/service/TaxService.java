@@ -29,6 +29,7 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.time.Year;
 import java.util.*;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static com.project.marginal.tax.calculator.utility.NumberFormatUtils.percentFormat;
@@ -55,15 +56,16 @@ public class TaxService {
         return year < MIN_YEAR || year > MAX_YEAR;
     }
 
+    @SuppressWarnings("unchecked")
     private boolean isNoTaxYear(int year) {
-        String cacheKey = String.format("noTaxYear-%d", year);
-        Boolean cached = (Boolean) cacheService.get(cacheKey);
-        if (cached != null) {
-            return cached;
+        Set<Integer> noTaxYears = (Set<Integer>) cacheService.get("noTaxYears:all");
+        if (noTaxYears == null) {
+            noTaxYears = noTaxRepo.findAll().stream()
+                    .map(NoIncomeTaxYear::getYear)
+                    .collect(Collectors.toUnmodifiableSet());
+            cacheService.put("noTaxYears:all", noTaxYears);
         }
-        boolean noTaxYear = noTaxRepo.existsById(year);
-        cacheService.put(cacheKey, noTaxYear);
-        return noTaxYear;
+        return noTaxYears.contains(year);
     }
 
     private void validateTaxInput(TaxInput taxInput) {
