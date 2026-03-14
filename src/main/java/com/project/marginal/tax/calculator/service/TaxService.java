@@ -61,8 +61,7 @@ public class TaxService {
         Set<Integer> noTaxYears = (Set<Integer>) cacheService.get("noTaxYears:all");
         if (noTaxYears == null) {
             noTaxYears = noTaxRepo.findAll().stream()
-                    .map(NoIncomeTaxYear::getYear)
-                    .collect(Collectors.toUnmodifiableSet());
+                    .map(NoIncomeTaxYear::getYear).collect(Collectors.toSet());
             cacheService.put("noTaxYears:all", noTaxYears);
         }
         return noTaxYears.contains(year);
@@ -123,6 +122,10 @@ public class TaxService {
 
     @CircuitBreaker(name = "database", fallbackMethod = "listYearsFallback")
     public List<Integer> listYears() {
+        @SuppressWarnings("unchecked")
+        List<Integer> cached = (List<Integer>) cacheService.get("years:all");
+        if (cached != null) return cached;
+
         List<Integer> noTaxYears = noTaxRepo.findAll().stream()
                 .map(NoIncomeTaxYear::getYear)
                 .toList();
@@ -134,7 +137,7 @@ public class TaxService {
         List<Integer> result = Stream.concat(bracketYears.stream(), noTaxYears.stream())
                 .distinct()
                 .sorted()
-                .toList();
+                .collect(Collectors.toList());
 
         cacheService.put("years:all", result);
         return result;
@@ -177,9 +180,9 @@ public class TaxService {
             return cached;
         }
 
-        List<TaxRateDto> result = status == null
+        List<TaxRateDto> result = new ArrayList<>(status == null
                 ? getTaxRateByYear(year)
-                : getTaxRateByYearAndStatus(year, status);
+                : getTaxRateByYearAndStatus(year, status));
 
         cacheService.put(cacheKey, result);
         return result;
@@ -283,6 +286,10 @@ public class TaxService {
             throw new IllegalArgumentException("Invalid year: " + year);
         }
 
+        String cacheKey = summaryKey(year, status);
+        TaxSummaryResponse cached = (TaxSummaryResponse) cacheService.get(cacheKey);
+        if (cached != null) return cached;
+
         if (isNoTaxYear(year)) {
             String msg = noTaxRepo.findById(year).map(NoIncomeTaxYear::getMessage)
                     .orElse("No income tax for year " + year);
@@ -311,10 +318,11 @@ public class TaxService {
         String averageRate = avgRateRaw == 0.0 ? "No Income Tax" : percentFormat(avgRateRaw);
 
         TaxSummaryResponse result = TaxSummaryResponse.normal(year, status, bracketCount, minThreshold, maxThreshold, averageRate);
-        cacheService.put(summaryKey(year, status), result);
+        cacheService.put(cacheKey, result);
         return result;
     }
 
+    @SuppressWarnings("unchecked")
     @WithSpan("tax.history")
     @CircuitBreaker(name = "database", fallbackMethod = "getHistoryFallback")
     public List<YearMetric> getHistory(
@@ -331,68 +339,61 @@ public class TaxService {
             throw new IllegalArgumentException("Unsupported metric: " + null);
         }
 
-        List<Integer> bracketYears = taxRateRepo.findByStatus(status).stream()
-                .map(TaxRate::getYear)
-                .distinct()
-                .sorted()
-                .filter(year -> year >= startYear && year <= endYear)
-                .toList();
+        String cacheKey = historyKey(status, metric, startYear, endYear);
+        @SuppressWarnings("unchecked")
+        List<YearMetric> cached = (List<YearMetric>) cacheService.get(cacheKey);
+        if (cached != null) return cached;
 
-        List<Integer> noTaxYears = noTaxRepo.findAll().stream()
-                .map(NoIncomeTaxYear::getYear)
-                .filter(year -> year >= startYear && year <= endYear)
-                .toList();
+        // Reuse the shared noTaxYears cache instead of hitting the DB again
+        Set<Integer> noTaxYears = (Set<Integer>) cacheService.get("noTaxYears:all");
+        if (noTaxYears == null) {
+            noTaxYears = noTaxRepo.findAll().stream()
+                    .map(NoIncomeTaxYear::getYear).collect(Collectors.toSet());
+            cacheService.put("noTaxYears:all", noTaxYears);
+        }
+        final Set<Integer> noTaxYearsInRange = noTaxYears.stream()
+                .filter(y -> y >= startYear && y <= endYear)
+                .collect(Collectors.toSet());
 
-        List<Integer> years = Stream.concat(bracketYears.stream(), noTaxYears.stream())
+        // Group all bracket data by year up front — avoids N+1 findByYearAndStatus calls
+        Map<Integer, List<TaxRate>> ratesByYear = taxRateRepo.findByStatus(status).stream()
+                .filter(r -> r.getYear() >= startYear && r.getYear() <= endYear)
+                .collect(Collectors.groupingBy(TaxRate::getYear));
+
+        List<Integer> years = Stream.concat(ratesByYear.keySet().stream(), noTaxYearsInRange.stream())
                 .distinct()
                 .sorted()
                 .toList();
 
         List<YearMetric> result = years.stream().map(y -> {
-            List<TaxRate> rates = taxRateRepo.findByYearAndStatus(y, status);
-            if (noTaxYears.contains(y)) {
+            if (noTaxYearsInRange.contains(y)) {
                 String msg = noTaxRepo.findById(y)
                         .map(NoIncomeTaxYear::getMessage)
                         .orElse("No income tax for year " + y);
                 return YearMetric.noIncomeTax(y, metric, msg);
             }
+            List<TaxRate> rates = ratesByYear.getOrDefault(y, List.of());
             String val;
             switch (metric) {
                 case TOP_RATE -> {
-                    double maxRate = rates.stream()
-                            .mapToDouble(TaxRate::getRate)
-                            .max()
-                            .orElse(0.0);
+                    double maxRate = rates.stream().mapToDouble(TaxRate::getRate).max().orElse(0.0);
                     val = maxRate == 0d ? "No Income Tax" : percentFormat(maxRate);
                 }
-
                 case MIN_RATE -> {
-                    double minRate = rates.stream()
-                            .mapToDouble(TaxRate::getRate)
-                            .min()
-                            .orElse(0.0);
+                    double minRate = rates.stream().mapToDouble(TaxRate::getRate).min().orElse(0.0);
                     val = minRate == 0d ? "No Income Tax" : percentFormat(minRate);
                 }
-
                 case AVERAGE_RATE -> {
-                    double avgRate = rates.stream()
-                            .mapToDouble(TaxRate::getRate)
-                            .average()
-                            .orElse(0.0);
+                    double avgRate = rates.stream().mapToDouble(TaxRate::getRate).average().orElse(0.0);
                     val = avgRate == 0d ? "No Income Tax" : percentFormat(avgRate);
                 }
-
-                case BRACKET_COUNT -> {
-                    int bracketCount = rates.size();
-                    val = String.valueOf(bracketCount);
-                }
-
+                case BRACKET_COUNT -> val = String.valueOf(rates.size());
                 default -> throw new IllegalArgumentException("Unsupported metric: " + metric);
             }
             return new YearMetric(y, metric, val);
-        }).toList();
+        }).collect(Collectors.toList());
 
-        cacheService.put(historyKey(status, metric, startYear, endYear), result);
+        cacheService.put(cacheKey, result);
         return result;
     }
 
