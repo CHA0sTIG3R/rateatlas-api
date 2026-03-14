@@ -93,7 +93,7 @@ public class TaxServiceTest {
     @Test
     public void getRates_noTaxYear_returnsNoIncomeTaxDto() {
         int year = 1895;
-        when(noTaxRepo.existsById(year)).thenReturn(true);
+        when(noTaxRepo.findAll()).thenReturn(List.of(new NoIncomeTaxYear(year)));
         when(noTaxRepo.findById(year)).thenReturn(Optional.of(new NoIncomeTaxYear(year)));
         List<TaxRateDto> dtos = service.getRates(year, FilingStatus.S);
         assertEquals(1, dtos.size());
@@ -110,7 +110,6 @@ public class TaxServiceTest {
     public void getRates_nullStatus_returnsAllStatuses() {
         int year = 2021;
         TaxRate r1 = new TaxRate(year, FilingStatus.S,  0.1f, BigDecimal.ZERO, BigDecimal.TEN);
-        when(noTaxRepo.existsById(year)).thenReturn(false);
         when(repo.findByYear(year)).thenReturn(List.of(r1));
         List<TaxRateDto> dtos = service.getRates(year, null);
         assertEquals(1, dtos.size());
@@ -121,7 +120,6 @@ public class TaxServiceTest {
     public void getRates_withStatus_returnsFiltered() {
         int year = 2021;
         TaxRate r1 = new TaxRate(year, FilingStatus.MFJ, 0.1f, BigDecimal.ZERO, BigDecimal.TEN);
-        when(noTaxRepo.existsById(year)).thenReturn(false);
         when(repo.findByYearAndStatus(year, FilingStatus.MFJ)).thenReturn(List.of(r1));
         List<TaxRateDto> dtos = service.getRates(year, FilingStatus.MFJ);
         assertEquals(1, dtos.size());
@@ -162,7 +160,7 @@ public class TaxServiceTest {
     @Test
     public void getSummary_noTaxYear_returnsNoIncomeTaxSummary() {
         int year = 2024;
-        when(noTaxRepo.existsById(year)).thenReturn(true);
+        when(noTaxRepo.findAll()).thenReturn(List.of(new NoIncomeTaxYear(year)));
         when(noTaxRepo.findById(year)).thenReturn(Optional.of(new NoIncomeTaxYear(year)));
         TaxSummaryResponse resp = service.getSummary(year, FilingStatus.S);
         assertEquals(year, resp.year());
@@ -176,7 +174,6 @@ public class TaxServiceTest {
     @Test
     public void getSummary_normalYear_returnsCorrectSummary() {
         int year = 2022;
-        when(noTaxRepo.existsById(year)).thenReturn(false);
         TaxRate t1 = new TaxRate(year, FilingStatus.S, 0.10f, BigDecimal.ZERO, new BigDecimal("5000"));
         TaxRate t2 = new TaxRate(year, FilingStatus.S, 0.20f, new BigDecimal("5000"), new BigDecimal("10000"));
         when(repo.findByYearAndStatus(year, FilingStatus.S)).thenReturn(List.of(t1, t2));
