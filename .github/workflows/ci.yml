@@ -12,7 +12,7 @@ jobs:
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }} 
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
@@ -29,7 +29,7 @@ jobs:
             AWS_REGION: ${{ env.AWS_REGION }}
 
       - name: Cache Maven packages
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
             path: ~/.m2
             key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
@@ -38,3 +38,11 @@ jobs:
 
       - name: Build & run tests
         run: mvn clean test
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+            token: ${{ secrets.CODECOV_TOKEN }}
+            files: target/site/jacoco/jacoco.xml
+            flags: unittests
+            fail_ci_if_error: false
