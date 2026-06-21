@@ -13,6 +13,7 @@ package com.project.marginal.tax.calculator.controller;
 
 import com.project.marginal.tax.calculator.dto.*;
 import com.project.marginal.tax.calculator.entity.FilingStatus;
+import com.project.marginal.tax.calculator.service.CacheService;
 import com.project.marginal.tax.calculator.service.TaxDataImportService;
 import com.project.marginal.tax.calculator.service.TaxService;
 import lombok.RequiredArgsConstructor;
@@ -32,6 +33,7 @@ public class TaxController {
 
     private final TaxService service;
     private final TaxDataImportService importService;
+    private final CacheService cacheService;
 
     @PostMapping(
             path = "/upload",
@@ -41,6 +43,8 @@ public class TaxController {
     public ResponseEntity<String> updateTaxRates(@RequestBody byte[] csvData) {
         try (InputStream in = new ByteArrayInputStream(csvData)) {
             importService.importData(in);
+            cacheService.evictByPattern("brackets:*");
+            cacheService.evictByPattern("calc:*");
             return ResponseEntity.ok("Tax rates updated successfully.");
         }
         catch (Exception e) {

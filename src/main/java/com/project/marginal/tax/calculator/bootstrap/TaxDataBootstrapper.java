@@ -1,6 +1,7 @@
 package com.project.marginal.tax.calculator.bootstrap;
 
 import com.project.marginal.tax.calculator.repository.TaxRateRepository;
+import com.project.marginal.tax.calculator.service.DatasetService;
 import com.project.marginal.tax.calculator.service.TaxDataImportService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -22,6 +23,7 @@ public class TaxDataBootstrapper implements ApplicationRunner {
     private final S3Client s3Client;
     private final TaxDataImportService importer;
     private final TaxRateRepository taxRateRepo;
+    private final DatasetService datasetService;
 
     @Value("${tax.s3-bucket:}")
     private String s3Bucket;
@@ -34,16 +36,21 @@ public class TaxDataBootstrapper implements ApplicationRunner {
 
         if (taxRateRepo.count() > 0) {
             log.info("Tax data already present, skipping bootstrap");
-            return;
-        }
-        if (s3Bucket.isBlank() || s3Key.isBlank()) {
+        } else if (s3Bucket.isBlank() || s3Key.isBlank()) {
             log.warn("S3 not configured, skipping bootstrap");
-            return;
+        } else {
+            log.info("DB empty, bootstrapping from s3://{}/{}", s3Bucket, s3Key);
+            try (InputStream in = s3Client.getObject(
+                    GetObjectRequest.builder().bucket(s3Bucket).key(s3Key).build())) {
+                importer.importData(in);
+            }
         }
-        log.info("DB empty, bootstrapping from s3://{}/{}", s3Bucket, s3Key);
-        try (InputStream in = s3Client.getObject(
-                GetObjectRequest.builder().bucket(s3Bucket).key(s3Key).build())) {
-            importer.importData(in);
+
+        try {
+            datasetService.getLatestDataset();
+            log.info("Freshness gauge primed on startup");
+        } catch (Exception e) {
+            log.warn("No ingest metadata found on startup, freshness gauge not primed");
         }
     }
 }

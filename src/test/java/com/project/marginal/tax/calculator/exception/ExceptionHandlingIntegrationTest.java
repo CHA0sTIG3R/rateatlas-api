@@ -3,7 +3,9 @@ package com.project.marginal.tax.calculator.exception;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.project.marginal.tax.calculator.controller.TaxController;
 import com.project.marginal.tax.calculator.dto.TaxInput;
-import com.project.marginal.tax.calculator.security.ApiKeyFilter;
+import com.project.marginal.tax.calculator.filter.ApiKeyFilter;
+import com.project.marginal.tax.calculator.filter.RateLimitFilter;
+import com.project.marginal.tax.calculator.service.CacheService;
 import com.project.marginal.tax.calculator.service.TaxDataImportService;
 import com.project.marginal.tax.calculator.service.TaxService;
 import org.junit.jupiter.api.Test;
@@ -39,6 +41,12 @@ public class ExceptionHandlingIntegrationTest {
 
     @MockitoBean
     private ApiKeyFilter apiKeyFilter; // Mock the ApiKeyFilter to avoid actual API key checks
+
+    @MockitoBean
+    private CacheService cacheService;
+
+    @MockitoBean
+    private RateLimitFilter rateLimitFilter;
 
     private final ObjectMapper mapper = new ObjectMapper();
 

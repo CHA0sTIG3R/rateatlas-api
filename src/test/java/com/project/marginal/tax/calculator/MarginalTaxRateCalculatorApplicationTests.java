@@ -5,9 +5,11 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.utility.DockerImageName;
 
 @Testcontainers
 @SpringBootTest(
@@ -21,6 +23,12 @@ class MarginalTaxRateCalculatorApplicationTests {
 
 	@Container
 	private static final PostgreSQLContainer<?> postgres;
+
+	@Container
+	@SuppressWarnings("resource")
+	private static final GenericContainer<?> redis =
+			new GenericContainer<>(DockerImageName.parse("redis:7-alpine"))
+					.withExposedPorts(6379);
 
 	static {
         //noinspection resource
@@ -36,6 +44,8 @@ class MarginalTaxRateCalculatorApplicationTests {
 		registry.add("spring.datasource.username", postgres::getUsername);
 		registry.add("spring.datasource.password", postgres::getPassword);
 		registry.add("spring.jpa.hibernate.ddl-auto", () -> "create-drop");
+		registry.add("spring.data.redis.url",
+				() -> "redis://localhost:" + redis.getMappedPort(6379));
 	}
 
 	@Test

@@ -18,12 +18,18 @@ import com.project.marginal.tax.calculator.entity.TaxRate;
 import com.project.marginal.tax.calculator.metrics.MetricsService;
 import com.project.marginal.tax.calculator.repository.NoIncomeTaxYearRepository;
 import com.project.marginal.tax.calculator.repository.TaxRateRepository;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
+import io.opentelemetry.instrumentation.annotations.SpanAttribute;
+import io.opentelemetry.instrumentation.annotations.WithSpan;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.time.Year;
 import java.util.*;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static com.project.marginal.tax.calculator.utility.NumberFormatUtils.percentFormat;
@@ -32,47 +38,109 @@ import static com.project.marginal.tax.calculator.utility.NumberFormatUtils.perc
 @RequiredArgsConstructor
 public class TaxService {
 
+    private static final Logger log = LoggerFactory.getLogger(TaxService.class);
+
     final int MIN_YEAR = 1862;
     final int MAX_YEAR = Year.now().getValue() - 1;
 
     private final TaxRateRepository taxRateRepo;
     private final NoIncomeTaxYearRepository noTaxRepo;
     private final MetricsService metricsService;
+    private final CacheService cacheService;
+
+    // -------------------------------------------------------------------------
+    // Private helpers
+    // -------------------------------------------------------------------------
 
     private boolean isNotValidYear(int year) {
         return year < MIN_YEAR || year > MAX_YEAR;
     }
+
+    @SuppressWarnings("unchecked")
     private boolean isNoTaxYear(int year) {
-        return noTaxRepo.existsById(year);
+        Set<Integer> noTaxYears = (Set<Integer>) cacheService.get("noTaxYears:all");
+        if (noTaxYears == null) {
+            noTaxYears = noTaxRepo.findAll().stream()
+                    .map(NoIncomeTaxYear::getYear).collect(Collectors.toSet());
+            cacheService.put("noTaxYears:all", noTaxYears);
+        }
+        return noTaxYears.contains(year);
     }
 
     private void validateTaxInput(TaxInput taxInput) {
         if (isNotValidYear(taxInput.getYear())) {
             throw new IllegalArgumentException("Invalid year: " + taxInput.getYear());
         }
-
         if (taxInput.getIncome() <= 0) {
             throw new IllegalArgumentException("Income must be greater than 0");
         }
-
         if (taxInput.getStatus() == null) {
             throw new IllegalArgumentException("Filing status must be provided");
         }
     }
 
+    private TaxRateDto mapToTaxRateDto(TaxRate taxRate) {
+        return new TaxRateDto(
+                taxRate.getYear(),
+                taxRate.getStatus(),
+                taxRate.getRangeStart().floatValue(),
+                taxRate.getRangeEnd() != null ? taxRate.getRangeEnd().floatValue() : 0,
+                taxRate.getRate()
+        );
+    }
+
+    // Cache key builders — single source of truth for each key pattern
+    private String bracketsKey(int year, FilingStatus status) {
+        return String.format("brackets:%d:%s", year, status != null ? status.name() : "ALL");
+    }
+
+    private String calcKey(TaxInput taxInput) {
+        return String.format("calc:%d:%s:%f", taxInput.getYear(), taxInput.getStatus().name(), taxInput.getIncome());
+    }
+
+    private String summaryKey(int year, FilingStatus status) {
+        return String.format("summary:%d:%s", year, status != null ? status.name() : "ALL");
+    }
+
+    private String historyKey(FilingStatus status, Metric metric, Integer startYear, Integer endYear) {
+        return String.format("history:%s:%s:%d:%d", status, metric, startYear, endYear);
+    }
+
+    // Generic fallback helper — checks cache then throws 503
+    @SuppressWarnings("unchecked")
+    private <T> T getFromCacheOrThrow(String cacheKey, String errorMessage) {
+        T cached = (T) cacheService.get(cacheKey);
+        if (cached != null) {
+            return cached;
+        }
+        throw new IllegalStateException(errorMessage);
+    }
+
+    // -------------------------------------------------------------------------
+    // Public API
+    // -------------------------------------------------------------------------
+
+    @CircuitBreaker(name = "database", fallbackMethod = "listYearsFallback")
     public List<Integer> listYears() {
-        List <Integer> noTaxYears = noTaxRepo.findAll().stream()
+        @SuppressWarnings("unchecked")
+        List<Integer> cached = (List<Integer>) cacheService.get("years:all");
+        if (cached != null) return cached;
+
+        List<Integer> noTaxYears = noTaxRepo.findAll().stream()
                 .map(NoIncomeTaxYear::getYear)
                 .toList();
 
-        List<Integer> bracketYears =  taxRateRepo.findAll().stream()
+        List<Integer> bracketYears = taxRateRepo.findAll().stream()
                 .map(TaxRate::getYear)
                 .toList();
 
-        return Stream.concat(bracketYears.stream(), noTaxYears.stream())
+        List<Integer> result = Stream.concat(bracketYears.stream(), noTaxYears.stream())
                 .distinct()
                 .sorted()
-                .toList();
+                .collect(Collectors.toList());
+
+        cacheService.put("years:all", result);
+        return result;
     }
 
     public Map<String, String> getFilingStatus() {
@@ -81,29 +149,19 @@ public class TaxService {
 
     public List<TaxRateDto> getTaxRateByYear(int year) {
         return taxRateRepo.findByYear(year).stream()
-                .map(taxRate -> new TaxRateDto(
-                        taxRate.getYear(),
-                        taxRate.getStatus(),
-                        taxRate.getRangeStart().floatValue(),
-                        taxRate.getRangeEnd() != null ? taxRate.getRangeEnd().floatValue(): 0,
-                        taxRate.getRate()
-                ))
+                .map(this::mapToTaxRateDto)
                 .toList();
     }
 
     public List<TaxRateDto> getTaxRateByYearAndStatus(int year, FilingStatus status) {
         return taxRateRepo.findByYearAndStatus(year, status).stream()
-                .map(taxRate -> new TaxRateDto(
-                        taxRate.getYear(),
-                        taxRate.getStatus(),
-                        taxRate.getRangeStart().floatValue(),
-                        taxRate.getRangeEnd() != null ? taxRate.getRangeEnd().floatValue(): 0,
-                        taxRate.getRate()
-                ))
+                .map(this::mapToTaxRateDto)
                 .toList();
     }
 
-    public List<TaxRateDto> getRates(int year, FilingStatus status) {
+    @WithSpan("tax.brackets.lookup")
+    @CircuitBreaker(name = "database", fallbackMethod = "getRatesFallback")
+    public List<TaxRateDto> getRates(@SpanAttribute("tax.year") int year, @SpanAttribute("tax.status") FilingStatus status) {
         if (isNotValidYear(year)) {
             throw new IllegalArgumentException("Invalid year: " + year);
         }
@@ -115,11 +173,19 @@ public class TaxService {
             return List.of(TaxRateDto.noIncomeTax(year, status, msg));
         }
 
-        if (status == null) {
-            return getTaxRateByYear(year);
-        } else {
-            return getTaxRateByYearAndStatus(year, status);
+        String cacheKey = bracketsKey(year, status);
+        @SuppressWarnings("unchecked")
+        List<TaxRateDto> cached = (List<TaxRateDto>) cacheService.get(cacheKey);
+        if (cached != null) {
+            return cached;
         }
+
+        List<TaxRateDto> result = new ArrayList<>(status == null
+                ? getTaxRateByYear(year)
+                : getTaxRateByYearAndStatus(year, status));
+
+        cacheService.put(cacheKey, result);
+        return result;
     }
 
     public List<TaxRate> getTaxRateByYearAndStatusAndRangeStartLessThan(int year, FilingStatus status, float income) {
@@ -184,7 +250,9 @@ public class TaxService {
                 .sum();
     }
 
-    public TaxPaidResponse calculateTaxBreakdown(TaxInput taxInput) throws IllegalArgumentException {
+    @WithSpan("tax.calculate.breakdown")
+    @CircuitBreaker(name = "database", fallbackMethod = "calculateTaxBreakdownFallback")
+    public TaxPaidResponse calculateTaxBreakdown(@SpanAttribute("tax.year") TaxInput taxInput) throws IllegalArgumentException {
         validateTaxInput(taxInput);
 
         if (isNoTaxYear(taxInput.getYear())) {
@@ -194,19 +262,33 @@ public class TaxService {
             return TaxPaidResponse.noIncomeTax(msg);
         }
 
+        String cacheKey = calcKey(taxInput);
+        TaxPaidResponse cached = (TaxPaidResponse) cacheService.get(cacheKey);
+        if (cached != null) {
+            return cached;
+        }
+
         List<TaxPaidInfo> taxPaidInfos = getTaxPaidInfo(taxInput);
         float totalTaxPaid = getTotalTaxPaid(taxInput);
         float avgRate = totalTaxPaid / taxInput.getIncome();
 
+        TaxPaidResponse result = new TaxPaidResponse(taxPaidInfos, totalTaxPaid, avgRate);
+        cacheService.put(cacheKey, result);
+
         metricsService.recordTaxCalculation();
-        return new TaxPaidResponse(taxPaidInfos, totalTaxPaid, avgRate);
+        return result;
     }
 
-    public TaxSummaryResponse getSummary(int year, FilingStatus status) throws IllegalArgumentException {
-
+    @WithSpan("tax.summary")
+    @CircuitBreaker(name = "database", fallbackMethod = "getSummaryFallback")
+    public TaxSummaryResponse getSummary(@SpanAttribute("tax.year") int year, @SpanAttribute("tax.status") FilingStatus status) throws IllegalArgumentException {
         if (isNotValidYear(year)) {
             throw new IllegalArgumentException("Invalid year: " + year);
         }
+
+        String cacheKey = summaryKey(year, status);
+        TaxSummaryResponse cached = (TaxSummaryResponse) cacheService.get(cacheKey);
+        if (cached != null) return cached;
 
         if (isNoTaxYear(year)) {
             String msg = noTaxRepo.findById(year).map(NoIncomeTaxYear::getMessage)
@@ -235,14 +317,19 @@ public class TaxService {
 
         String averageRate = avgRateRaw == 0.0 ? "No Income Tax" : percentFormat(avgRateRaw);
 
-        return TaxSummaryResponse.normal(year, status, bracketCount, minThreshold, maxThreshold, averageRate);
+        TaxSummaryResponse result = TaxSummaryResponse.normal(year, status, bracketCount, minThreshold, maxThreshold, averageRate);
+        cacheService.put(cacheKey, result);
+        return result;
     }
 
+    @SuppressWarnings("unchecked")
+    @WithSpan("tax.history")
+    @CircuitBreaker(name = "database", fallbackMethod = "getHistoryFallback")
     public List<YearMetric> getHistory(
-            FilingStatus status,
-            Metric metric,
-            Integer startYear,
-            Integer endYear
+            @SpanAttribute("tax.status") FilingStatus status,
+            @SpanAttribute("tax.metric") Metric metric,
+            @SpanAttribute("tax.start_year") Integer startYear,
+            @SpanAttribute("tax.end_year") Integer endYear
     ) {
         if ((isNotValidYear(startYear) || isNotValidYear(endYear)) || (startYear > endYear)) {
             throw new IllegalArgumentException("Invalid year range: " + startYear + " - " + endYear);
@@ -252,72 +339,110 @@ public class TaxService {
             throw new IllegalArgumentException("Unsupported metric: " + null);
         }
 
-        List<Integer> bracketYears = taxRateRepo.findByStatus(status).stream()
-                .map(TaxRate::getYear)
+        String cacheKey = historyKey(status, metric, startYear, endYear);
+        @SuppressWarnings("unchecked")
+        List<YearMetric> cached = (List<YearMetric>) cacheService.get(cacheKey);
+        if (cached != null) return cached;
+
+        // Reuse the shared noTaxYears cache instead of hitting the DB again
+        Set<Integer> noTaxYears = (Set<Integer>) cacheService.get("noTaxYears:all");
+        if (noTaxYears == null) {
+            noTaxYears = noTaxRepo.findAll().stream()
+                    .map(NoIncomeTaxYear::getYear).collect(Collectors.toSet());
+            cacheService.put("noTaxYears:all", noTaxYears);
+        }
+        final Set<Integer> noTaxYearsInRange = noTaxYears.stream()
+                .filter(y -> y >= startYear && y <= endYear)
+                .collect(Collectors.toSet());
+
+        // Group all bracket data by year up front — avoids N+1 findByYearAndStatus calls
+        Map<Integer, List<TaxRate>> ratesByYear = taxRateRepo.findByStatus(status).stream()
+                .filter(r -> r.getYear() >= startYear && r.getYear() <= endYear)
+                .collect(Collectors.groupingBy(TaxRate::getYear));
+
+        List<Integer> years = Stream.concat(ratesByYear.keySet().stream(), noTaxYearsInRange.stream())
                 .distinct()
                 .sorted()
-                .filter(year -> year >= startYear && year <= endYear)
                 .toList();
 
-        List<Integer> noTaxYears = noTaxRepo.findAll().stream()
-                .map(NoIncomeTaxYear::getYear)
-                .filter(year -> year >= startYear && year <= endYear)
-                .toList();
-
-        List<Integer> years = Stream.concat(bracketYears.stream(), noTaxYears.stream())
-                .distinct()
-                .sorted()
-                .toList();
-
-        return years.stream().map(y -> {
-            List<TaxRate> rates = taxRateRepo.findByYearAndStatus(y, status);
-            if (noTaxYears.contains(y)) {
+        List<YearMetric> result = years.stream().map(y -> {
+            if (noTaxYearsInRange.contains(y)) {
                 String msg = noTaxRepo.findById(y)
                         .map(NoIncomeTaxYear::getMessage)
                         .orElse("No income tax for year " + y);
-                return  YearMetric.noIncomeTax(y, metric, msg);
+                return YearMetric.noIncomeTax(y, metric, msg);
             }
+            List<TaxRate> rates = ratesByYear.getOrDefault(y, List.of());
             String val;
             switch (metric) {
                 case TOP_RATE -> {
-                    double maxRate = rates.stream()
-                            .mapToDouble(TaxRate::getRate)
-                            .max()
-                            .orElse(0.0);
-                    val = maxRate==0d? "No Income Tax" : percentFormat(maxRate);
+                    double maxRate = rates.stream().mapToDouble(TaxRate::getRate).max().orElse(0.0);
+                    val = maxRate == 0d ? "No Income Tax" : percentFormat(maxRate);
                 }
-
                 case MIN_RATE -> {
-                    double minRate = rates.stream()
-                            .mapToDouble(TaxRate::getRate)
-                            .min()
-                            .orElse(0.0);
-                    val = minRate==0d? "No Income Tax" :  percentFormat(minRate);
+                    double minRate = rates.stream().mapToDouble(TaxRate::getRate).min().orElse(0.0);
+                    val = minRate == 0d ? "No Income Tax" : percentFormat(minRate);
                 }
-
                 case AVERAGE_RATE -> {
-                    double avgRate = rates.stream()
-                            .mapToDouble(TaxRate::getRate)
-                            .average()
-                            .orElse(0.0);
-                    val = avgRate==0d? "No Income Tax" :  percentFormat(avgRate);
+                    double avgRate = rates.stream().mapToDouble(TaxRate::getRate).average().orElse(0.0);
+                    val = avgRate == 0d ? "No Income Tax" : percentFormat(avgRate);
                 }
+                case BRACKET_COUNT -> val = String.valueOf(rates.size());
+                default -> throw new IllegalArgumentException("Unsupported metric: " + metric);
+            }
+            return new YearMetric(y, metric, val);
+        }).collect(Collectors.toList());
 
-                case BRACKET_COUNT -> {
-                    int bracketCount = rates.size();
-                    val = String.valueOf(bracketCount);
-                }
-
-            default -> throw new IllegalArgumentException("Unsupported metric: " + metric);
-        }
-        return new YearMetric(y, metric, val);
-        }).toList();
+        cacheService.put(cacheKey, result);
+        return result;
     }
 
+    @WithSpan("tax.simulate.bulk")
+    @CircuitBreaker(name = "database", fallbackMethod = "simulateBulkFallback")
     public List<TaxPaidResponse> simulateBulk(List<TaxInput> taxInputs) {
         metricsService.recordSimulateBulk();
         return taxInputs.stream()
                 .map(this::calculateTaxBreakdown)
                 .toList();
+    }
+
+    // -------------------------------------------------------------------------
+    // Fallback methods — invoked by Resilience4j via reflection
+    // -------------------------------------------------------------------------
+
+    @SuppressWarnings("unused")
+    private List<Integer> listYearsFallback(Throwable t) {
+        log.warn("listYears fallback triggered: {}", t.getMessage());
+        return getFromCacheOrThrow("years:all", "Tax year list is temporarily unavailable. Please try again later.");
+    }
+
+    @SuppressWarnings("unused")
+    private List<TaxRateDto> getRatesFallback(int year, FilingStatus status, Throwable t) {
+        log.warn("getRates fallback triggered for year={} status={}: {}", year, status, t.getMessage());
+        return getFromCacheOrThrow(bracketsKey(year, status), "Tax rate data is temporarily unavailable. Please try again later.");
+    }
+
+    @SuppressWarnings("unused")
+    private TaxPaidResponse calculateTaxBreakdownFallback(TaxInput taxInput, Throwable t) {
+        log.warn("calculateTaxBreakdown fallback triggered for year={} status={}: {}", taxInput.getYear(), taxInput.getStatus(), t.getMessage());
+        return getFromCacheOrThrow(calcKey(taxInput), "Tax calculation is temporarily unavailable. Please try again later.");
+    }
+
+    @SuppressWarnings("unused")
+    private TaxSummaryResponse getSummaryFallback(int year, FilingStatus status, Throwable t) {
+        log.warn("getSummary fallback triggered for year={} status={}: {}", year, status, t.getMessage());
+        return getFromCacheOrThrow(summaryKey(year, status), "Tax summary is temporarily unavailable. Please try again later.");
+    }
+
+    @SuppressWarnings("unused")
+    private List<YearMetric> getHistoryFallback(FilingStatus status, Metric metric, Integer startYear, Integer endYear, Throwable t) {
+        log.warn("getHistory fallback triggered for status={} metric={} range={}-{}: {}", status, metric, startYear, endYear, t.getMessage());
+        return getFromCacheOrThrow(historyKey(status, metric, startYear, endYear), "Tax history is temporarily unavailable. Please try again later.");
+    }
+
+    @SuppressWarnings("unused")
+    private List<TaxPaidResponse> simulateBulkFallback(List<TaxInput> taxInputs, Throwable t) {
+        log.warn("simulateBulk fallback triggered for {} inputs: {}", taxInputs.size(), t.getMessage());
+        throw new IllegalStateException("Bulk simulation is temporarily unavailable. Please try again later.");
     }
 }

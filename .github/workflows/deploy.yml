@@ -5,16 +5,15 @@ on:
     workflows: ["CI"]
     types: [completed]
   workflow_dispatch:
-    {}
 
 jobs:
   deploy:
     # Run when CI succeeded on default branch, or when manually triggered
     if: >-
-      ${{ (github.event_name == 'workflow_run' &&
-            github.event.workflow_run.conclusion == 'success' &&
-            github.event.workflow_run.head_branch == 'master') ||
-           (github.event_name == 'workflow_dispatch') }}
+      (github.event_name == 'workflow_run' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_branch == 'main') ||
+      github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       id-token: write   # for OIDC
@@ -27,13 +26,13 @@ jobs:
       TARGET_TAG_VALUE: tax-api
     steps:
       - name: Checkout tested commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
 
       - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::300536313917:role/GitHubOIDCRole
           aws-region: ${{ env.AWS_REGION }}
@@ -73,7 +72,7 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Determine if image-relevant files changed
         id: changes
@@ -97,7 +96,7 @@ jobs:
 
       - name: Build and push image to ECR
         if: steps.changes.outputs.should_build == 'true'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64
@@ -121,11 +120,59 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          aws ssm send-command \
+
+          COMMAND_ID=$(aws ssm send-command \
             --targets "Key=tag:${TARGET_TAG_KEY},Values=${TARGET_TAG_VALUE}" \
             --document-name "AWS-RunShellScript" \
             --comment "Deploy tax-api" \
             --timeout-seconds 1200 \
             --parameters '{"commands":["set -e","cd '"${APP_DIR}"'","pwd","ls -la","docker compose version","aws ecr get-login-password --region '"${AWS_REGION}"' | docker login --username AWS --password-stdin '"${ECR_REGISTRY}"'","docker compose pull","docker compose up -d --force-recreate","docker compose ps"]}' \
             --region "$AWS_REGION" \
-            --output text
+            --query "Command.CommandId" \
+            --output text)
+
+          echo "SSM command ID: $COMMAND_ID"
+
+          # Poll each target instance until all invocations reach a terminal state
+          TIMEOUT=1200
+          ELAPSED=0
+          INTERVAL=15
+          FAILED=0
+
+          while [ "$ELAPSED" -lt "$TIMEOUT" ]; do
+            sleep "$INTERVAL"
+            ELAPSED=$((ELAPSED + INTERVAL))
+
+            STATUSES=$(aws ssm list-command-invocations \
+              --command-id "$COMMAND_ID" \
+              --region "$AWS_REGION" \
+              --query "CommandInvocations[].Status" \
+              --output text)
+
+            echo "[$ELAPSED s] Statuses: $STATUSES"
+
+            # Check if any invocation is still in a pending/in-progress state
+            if echo "$STATUSES" | grep -qE "Pending|InProgress|Delayed"; then
+              continue
+            fi
+
+            # All invocations are terminal — check for failures
+            if echo "$STATUSES" | grep -qE "Failed|Cancelled|TimedOut|Undeliverable|Terminated"; then
+              echo "One or more SSM invocations failed:" >&2
+              aws ssm list-command-invocations \
+                --command-id "$COMMAND_ID" \
+                --region "$AWS_REGION" \
+                --details \
+                --query "CommandInvocations[].{Instance:InstanceId,Status:Status,Output:CommandPlugins[0].Output}" \
+                --output table >&2
+              FAILED=1
+            fi
+            break
+          done
+
+          if [ "$ELAPSED" -ge "$TIMEOUT" ] && [ "$FAILED" -eq 0 ]; then
+            echo "Timed out waiting for SSM command to complete." >&2
+            FAILED=1
+          fi
+
+          exit "$FAILED"
