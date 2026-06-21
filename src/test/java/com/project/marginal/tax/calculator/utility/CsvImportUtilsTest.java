@@ -19,7 +19,6 @@ import static org.junit.jupiter.api.Assertions.*;
 public class CsvImportUtilsTest {
 
     private CsvImportUtils csvUtil;
-    private S3Client s3Client;
     private final String HEADER;
 
     public CsvImportUtilsTest() {
@@ -29,7 +28,6 @@ public class CsvImportUtilsTest {
     @BeforeEach
     public void setUp() {
         csvUtil = new CsvImportUtils();
-        s3Client = S3Client.builder().build();
     }
 
     @Test
@@ -110,11 +108,14 @@ public class CsvImportUtilsTest {
     @Test
     @EnabledIfEnvironmentVariable(named = "AWS_ACCESS_KEY_ID", matches = ".+")
     public void importPerformance() throws Exception {
-        InputStream in = s3Client.getObject(
-                GetObjectRequest.builder()
-                        .bucket("marginal-tax-rate-calculator-hamza")
-                        .key("irs/irs_historical.csv")
-                        .build());
+        InputStream in;
+        try (S3Client s3Client = S3Client.builder().build()) {
+            in = s3Client.getObject(
+                    GetObjectRequest.builder()
+                            .bucket("marginal-tax-rate-calculator-hamza")
+                            .key("irs/irs_historical.csv")
+                            .build());
+        }
         long start = System.nanoTime();
         csvUtil.importFromStream(in);
         long elapsedSec = (System.nanoTime() - start)/1_000_000_000;
