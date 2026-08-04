@@ -53,6 +53,9 @@ Ongoing data updates are pushed directly by the `BracketForge` ingest Lambda aft
 - **GitHub Actions CI/CD** — test, build, push to ECR, and deploy to EC2 on every merge to `main`.
 - **Testcontainers integration tests** — real PostgreSQL and Redis containers spun up in CI for integration coverage.
 
+**Performance:** See [PERFORMANCE_REPORT.md](./PERFORMANCE_REPORT.md)
+for load test results and latency benchmarks.
+
 ---
 
 ## Implementation Status
