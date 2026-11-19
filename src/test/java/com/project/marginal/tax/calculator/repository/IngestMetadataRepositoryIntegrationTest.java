@@ -43,11 +43,18 @@ class IngestMetadataRepositoryIntegrationTest {
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", postgres::getJdbcUrl);
+        // Each test rebuilds the schema (new enum OID), which invalidates pgjdbc's server-side
+        // prepared statements on pooled connections ("cached plan must not change result type").
+        // Disable them for this class only; production migrates once at startup, before pool use.
+        registry.add("spring.datasource.url", () -> withParam(postgres.getJdbcUrl(), "prepareThreshold=0"));
         registry.add("spring.datasource.username", postgres::getUsername);
         registry.add("spring.datasource.password", postgres::getPassword);
         registry.add("spring.flyway.enabled", () -> "true");
         registry.add("spring.jpa.hibernate.ddl-auto", () -> "validate");
+    }
+
+    private static String withParam(String jdbcUrl, String param) {
+        return jdbcUrl + (jdbcUrl.contains("?") ? "&" : "?") + param;
     }
 
     private static final OffsetDateTime LAST_INGESTED_AT =
